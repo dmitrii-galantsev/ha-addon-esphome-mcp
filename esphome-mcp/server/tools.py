@@ -154,7 +154,15 @@ def flash(device: str) -> str:
     yaml_path = _device_yaml_path(device)
     if not os.path.isfile(yaml_path):
         return f"Device config not found: {yaml_path}"
-    return _run([ESPHOME_BIN, "run", yaml_path, "--no-logs"], timeout=600)
+    # Force OTA and run non-interactively. The add-on container may also expose
+    # USB serial adapters (/dev/ttyUSB*), which makes `esphome run` prompt for
+    # an upload target and crash with EOFError (no stdin under MCP). Target the
+    # device's mDNS name so the upload always goes Over-The-Air.
+    cmd = [ESPHOME_BIN, "run", yaml_path, "--no-logs"]
+    name = _parse_device_info(yaml_path).get("name", "")
+    if name and name not in ("unknown", "error") and "$" not in name:
+        cmd += ["--device", f"{name}.local"]
+    return _run(cmd, timeout=600)
 
 
 def logs(device: str, num_lines: int = 50) -> str:
