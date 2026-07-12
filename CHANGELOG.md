@@ -2,11 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## Attributors
-
-- **Bert Berrevoets** — Project author
-- **Claude Code** — AI-assisted development
-
 ## [1.4.0] - 2026-07-12
 
 ### Changed
@@ -85,8 +80,6 @@ All notable changes to this project will be documented in this file.
 ## [1.0.0] - 2026-03-17
 
 ### Added
-
-Author: *Bert Berrevoets, Claude Code*
 
 - Initial release as Home Assistant add-on
 - FastMCP server with streamable HTTP transport on port 8099
