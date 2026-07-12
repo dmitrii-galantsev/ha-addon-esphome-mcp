@@ -13,8 +13,8 @@ no SSH tunneling required.
 Claude Code (desktop)
      |  HTTP (MCP, port 8098, Bearer token)
      v
-HA Add-on (MCP Server)
-     |  HTTP/WS  -->  ESPHome Device Builder dashboard (official add-on, port 6052)
+HA Add-on (MCP Server, host_network)
+     |  HTTP/WS  -->  ESPHome Device Builder dashboard (127.0.0.1:<ingress_port>)
      |                    - GET /devices, GET /json-config
      |                    - WS /compile, WS /upload, WS /ws (logs)
      |  local file I/O
@@ -39,9 +39,22 @@ auth_token: "my-secret-token"
 ### dashboard_url
 
 URL of the ESPHome Device Builder dashboard the add-on delegates builds to.
-Defaults to the official ESPHome add-on's internal Supervisor hostname
-`http://core-esphome:6052`. If your ESPHome add-on has a different slug, set
-it here (find the slug in the add-on's page URL, or via `ha addons`).
+
+The HA ESPHome add-on serves its dashboard **ingress-only**, bound to
+`127.0.0.1:<ingress_port>` (there is no fixed `6052` listener), and its peer
+guard trusts only loopback and the Supervisor. This add-on therefore runs on
+`host_network` so `127.0.0.1` reaches the dashboard as a trusted peer — the
+same path HA core's ESPHome integration uses.
+
+Set this to `http://127.0.0.1:<ingress_port>`. Find the ingress port on the
+ESPHome add-on's page, or from the CLI:
+
+```bash
+ha addons info <esphome-slug> | grep ingress_port
+```
+
+The ingress port is stable for an install (it only changes if you reinstall
+the ESPHome add-on).
 
 ### dashboard_token
 

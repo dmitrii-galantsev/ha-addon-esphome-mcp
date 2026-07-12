@@ -7,6 +7,18 @@ All notable changes to this project will be documented in this file.
 - **Bert Berrevoets** — Project author
 - **Claude Code** — AI-assisted development
 
+## [1.4.0] - 2026-07-12
+
+### Changed
+
+- Run on `host_network` and default `dashboard_url` to `http://127.0.0.1:<port>`.
+  The HA ESPHome add-on serves its dashboard ingress-only on
+  `127.0.0.1:<ingress_port>` (no fixed 6052), and its peer guard trusts only
+  loopback/Supervisor — so a bridge-network add-on gets 403. host_network lets
+  us reach it over loopback as a trusted peer, mirroring HA core's ESPHome
+  integration. Set `dashboard_url` to `http://127.0.0.1:<ingress_port>` (find
+  it via `ha addons info <esphome-slug> | grep ingress_port`).
+
 ## [1.3.2] - 2026-07-12
 
 ### Fixed

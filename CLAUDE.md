@@ -36,8 +36,12 @@ direct access to the shared `/config/esphome/` filesystem on the HA host.
 - **Transport**: Streamable HTTP on port 8098 at `/mcp`
 - **Secrets**: `secrets.yaml` is explicitly rejected in push/pull tools
 - **ESPHome**: not bundled. Builds are delegated to the Device Builder
-  dashboard (`dashboard_url`, default `http://core-esphome:6052`) via its
-  HTTP/WS API — no local esphome binary, no version pin
+  dashboard via its HTTP/WS API — no local esphome binary, no version pin
+- **Networking**: `host_network: true`. The HA ESPHome add-on serves the
+  dashboard ingress-only on `127.0.0.1:<ingress_port>` and its peer guard
+  trusts only loopback/Supervisor, so we reach it over loopback (`dashboard_url`
+  = `http://127.0.0.1:<ingress_port>`). Bridge networking gets 403; the
+  official `core-esphome` hostname only exists for official add-ons
 - **Builds**: compile/flash consume the dashboard's WS spawn stream in a
   background thread; poll with `esphome_build_status` when a build outlives
   the sync window

@@ -39,13 +39,21 @@ export ESPHOME_DIR="/config/esphome"
 # Run on a non-default port so this fork can coexist with the original add-on.
 export MCP_PORT="${MCP_PORT:-8098}"
 
-# Delegate all builds to the ESPHome Device Builder dashboard (official ESPHome
-# add-on). Default to its internal Supervisor hostname; override in options if
-# your add-on slug differs. Token only needed if the dashboard has a password.
+# Delegate all builds to the ESPHome Device Builder dashboard. Under the HA
+# ESPHome add-on the dashboard is ingress-only on 127.0.0.1:<ingress_port>
+# (reachable because this add-on is host_network, and loopback is a trusted
+# peer). Set dashboard_url to http://127.0.0.1:<ingress_port> — find the port
+# on the ESPHome add-on page or via: ha addons info <esphome-slug> | grep ingress
+# Token only needed if the dashboard has a password.
 DASHBOARD_URL="$(opt dashboard_url)"
-export DASHBOARD_URL="${DASHBOARD_URL:-http://core-esphome:6052}"
+export DASHBOARD_URL="${DASHBOARD_URL:-http://127.0.0.1:6052}"
 export DASHBOARD_TOKEN="$(opt dashboard_token)"
 
 echo "[INFO] Delegating builds to dashboard: ${DASHBOARD_URL}"
+case "$DASHBOARD_URL" in
+    *:6052) echo "[WARN] dashboard_url uses :6052 — the HA ESPHome add-on serves"
+            echo "[WARN] on its ingress port, not 6052. If builds fail to connect,"
+            echo "[WARN] set dashboard_url to http://127.0.0.1:<ingress_port>." ;;
+esac
 echo "[INFO] Starting ESPHome MCP Server on port ${MCP_PORT}..."
 exec python3 -m server.main

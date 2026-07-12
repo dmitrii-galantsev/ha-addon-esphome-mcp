@@ -1,5 +1,5 @@
 name: ESPHome MCP Server (glibc fork)
-version: 1.3.2
+version: 1.4.0
 slug: esphome-mcp
 description: >-
   MCP (Model Context Protocol) server exposing ESPHome operations as tools
@@ -19,7 +19,7 @@ map:
   - config:rw
 options:
   auth_token: ""
-  dashboard_url: "http://core-esphome:6052"
+  dashboard_url: "http://127.0.0.1:6052"
   dashboard_token: ""
 schema:
   auth_token: str
@@ -28,6 +28,10 @@ schema:
 startup: application
 boot: auto
 init: false
-host_network: false
+# host_network so the add-on can reach the ESPHome Device Builder dashboard on
+# 127.0.0.1:<ingress_port>. The dashboard runs host-network + ingress-only and
+# its peer guard trusts ONLY loopback/supervisor, so a bridge-network add-on
+# gets 403. This mirrors how HA core's ESPHome integration reaches it.
+host_network: true
 ingress: false
 panel_icon: mdi:chip

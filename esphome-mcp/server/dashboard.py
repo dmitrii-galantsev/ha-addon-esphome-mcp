@@ -34,10 +34,10 @@ from collections.abc import Callable
 
 import aiohttp
 
-# Reachable from the MCP add-on over the Supervisor network. The official
-# ESPHome add-on's internal hostname is normally ``core-esphome``; override
-# via the add-on's ``dashboard_url`` option if your slug differs.
-DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://core-esphome:6052").rstrip("/")
+# The HA ESPHome add-on serves the dashboard ingress-only on
+# ``127.0.0.1:<ingress_port>``; this add-on runs host_network so loopback (a
+# trusted peer) reaches it. Set the ``dashboard_url`` option to that port.
+DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://127.0.0.1:6052").rstrip("/")
 # Only needed if the dashboard has a password configured; blank = open.
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "")
 
