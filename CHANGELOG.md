@@ -7,6 +7,16 @@ All notable changes to this project will be documented in this file.
 - **Bert Berrevoets** — Project author
 - **Claude Code** — AI-assisted development
 
+## [1.3.1] - 2026-07-12
+
+### Fixed
+
+- Build on the trusted HA Alpine base (`ghcr.io/home-assistant/{arch}-base`)
+  and install `python3`/`py3-pip`/`bash` via apk. Supervisor rejects
+  untrusted base images like `python:3.12-slim` (Docker Hub library) and
+  silently falls back to the HA base, which lacks pip — so 1.3.0 failed to
+  build with `pip3: not found`.
+
 ## [1.3.0] - 2026-07-12
 
 ### Changed

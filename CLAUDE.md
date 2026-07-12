@@ -50,7 +50,7 @@ The add-on is built by HA Supervisor when installed. For local testing:
 
 ```bash
 cd esphome-mcp
-docker build --build-arg BUILD_FROM=python:3.12-slim -t esphome-mcp .
+docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest -t esphome-mcp .
 docker run -p 8098:8098 -v /path/to/config:/config \
     -e ESPHOME_MCP_AUTH_TOKEN=test \
     -e DASHBOARD_URL=http://host.docker.internal:6052 esphome-mcp

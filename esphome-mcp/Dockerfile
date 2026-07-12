@@ -3,11 +3,18 @@ ARG BUILD_FROM
 # build/flash/validate/logs call to the ESPHome Device Builder dashboard
 # running in the official ESPHome add-on. So there's no need for the heavy
 # ESPHome (Debian/glibc + ESP toolchains + PlatformIO) base image or its
-# pinned esphome version; a slim Python base (set in build.yaml) is enough.
+# pinned esphome version.
+#
+# HA Supervisor only accepts base images from trusted registries, so we build
+# on the standard HA Alpine base (set in build.yaml) and add just Python + pip
+# + bash. Pure-Python + musllinux wheels (aiohttp, pydantic-core) install
+# without a compiler.
 FROM ${BUILD_FROM}
 
+RUN apk add --no-cache python3 py3-pip bash
+
 COPY requirements.txt /tmp/
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt \
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
 # Copy server code

@@ -1,6 +1,7 @@
-# Slim Python base — no ESPHome toolchain is bundled anymore; all builds are
-# delegated to the ESPHome Device Builder dashboard. This removes the pinned
-# esphome version that used to reject configs needing newer features.
+# Standard HA Alpine base (trusted registry — Supervisor rejects arbitrary
+# ones like docker.io/library/python). No ESPHome toolchain is bundled; all
+# builds are delegated to the ESPHome Device Builder dashboard. Python/pip/bash
+# are added in the Dockerfile.
 build_from:
-  aarch64: python:3.12-slim
-  amd64: python:3.12-slim
+  aarch64: ghcr.io/home-assistant/aarch64-base:latest
+  amd64: ghcr.io/home-assistant/amd64-base:latest
