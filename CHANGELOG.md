@@ -7,6 +7,28 @@ All notable changes to this project will be documented in this file.
 - **Bert Berrevoets** — Project author
 - **Claude Code** — AI-assisted development
 
+## [1.3.0] - 2026-07-12
+
+### Changed
+
+- **Builds are now delegated to the ESPHome Device Builder dashboard** (the
+  official ESPHome add-on) over its HTTP/WS API instead of running a bundled
+  `esphome` binary. This removes the pinned esphome version that lived in the
+  Docker base image — configs needing newer ESPHome features (e.g. the
+  `WAVESHARE-ESP32-C6-LCD-1.47` display model) no longer fail with an
+  "Unknown value" error because the add-on always builds with current ESPHome.
+- `compile`/`flash` drive the dashboard's `/compile` and `/upload` WebSocket
+  spawn protocol; `validate` uses `GET /json-config`; `list_devices` uses
+  `GET /devices`; `logs` streams the `/ws` `devices/logs` command. File and
+  font tools still read/write the shared `/config/esphome` mount directly.
+- Dropped the heavy `ghcr.io/esphome/esphome` base image for a slim
+  `python:3.12-slim` — no ESP toolchain or PlatformIO is shipped anymore.
+
+### Added
+
+- Options `dashboard_url` (default `http://core-esphome:6052`) and
+  `dashboard_token` (only needed if the dashboard has a password set).
+
 ## [1.2.0] - 2026-05-20 (glibc fork)
 
 ### Changed

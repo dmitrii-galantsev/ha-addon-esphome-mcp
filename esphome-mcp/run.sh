@@ -6,12 +6,17 @@ set -e
 
 OPTIONS_FILE="/data/options.json"
 
-# Read auth token from add-on config (replaces bashio::config)
-AUTH_TOKEN="$(python3 -c "import json,sys;
+# Small helper to read a key from the add-on options JSON.
+opt() {
+    python3 -c "import json;
 try:
-    print(json.load(open('${OPTIONS_FILE}')).get('auth_token') or '')
+    print(json.load(open('${OPTIONS_FILE}')).get('$1') or '')
 except Exception:
-    print('')" 2>/dev/null || true)"
+    print('')" 2>/dev/null || true
+}
+
+# Read auth token from add-on config (replaces bashio::config)
+AUTH_TOKEN="$(opt auth_token)"
 
 # Auto-generate token if not configured
 if [ -z "$AUTH_TOKEN" ] || [ "$AUTH_TOKEN" = "null" ]; then
@@ -34,9 +39,13 @@ export ESPHOME_DIR="/config/esphome"
 # Run on a non-default port so this fork can coexist with the original add-on.
 export MCP_PORT="${MCP_PORT:-8098}"
 
-# Reuse the PlatformIO toolchains/cache the official ESPHome Device Builder
-# add-on already downloaded under /config, avoiding a second download.
-export PLATFORMIO_CORE_DIR="/config/esphome/.esphome/.platformio"
+# Delegate all builds to the ESPHome Device Builder dashboard (official ESPHome
+# add-on). Default to its internal Supervisor hostname; override in options if
+# your add-on slug differs. Token only needed if the dashboard has a password.
+DASHBOARD_URL="$(opt dashboard_url)"
+export DASHBOARD_URL="${DASHBOARD_URL:-http://core-esphome:6052}"
+export DASHBOARD_TOKEN="$(opt dashboard_token)"
 
+echo "[INFO] Delegating builds to dashboard: ${DASHBOARD_URL}"
 echo "[INFO] Starting ESPHome MCP Server on port ${MCP_PORT}..."
 exec python3 -m server.main

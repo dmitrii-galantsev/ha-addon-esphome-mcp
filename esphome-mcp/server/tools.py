@@ -1,23 +1,26 @@
 """ESPHome MCP tool implementations.
 
-All tools operate locally on the Home Assistant filesystem — no SSH needed.
+Build/flash/validate/logs/list are delegated to the ESPHome Device Builder
+dashboard over HTTP/WS (see ``dashboard.py``) so they always run against the
+official ESPHome add-on's current esphome — this add-on ships no toolchain.
+
+File and font tools still operate directly on the shared Home Assistant
+filesystem (``/config/esphome``), which needs no esphome binary.
 """
 
+import asyncio
 import base64
 import glob
 import logging
 import os
-import re
-import subprocess
 import threading
 import time
 
-import yaml
+from . import dashboard
 
 log = logging.getLogger("esphome-mcp")
 
 ESPHOME_DIR = os.environ.get("ESPHOME_DIR", "/config/esphome")
-ESPHOME_BIN = "esphome"
 
 FORBIDDEN_FILES = {"secrets.yaml", ".secret.yaml"}
 
@@ -25,7 +28,7 @@ FORBIDDEN_FILES = {"secrets.yaml", ".secret.yaml"}
 # handle. Must stay comfortably under the MCP client's request timeout so a
 # long build returns a handle instead of erroring with a transport timeout.
 SYNC_WAIT_WINDOW = 45
-# Hard server-side caps on background builds.
+# Hard caps on background builds.
 COMPILE_TIMEOUT = 600
 FLASH_TIMEOUT = 900
 
@@ -45,7 +48,7 @@ def _resolve_device(device: str) -> str:
 
 
 def _device_yaml_path(device: str) -> str:
-    """Return the full path to a device YAML file."""
+    """Return the full path to a device YAML file (active or archived)."""
     filename = _resolve_device(device)
     path = os.path.join(ESPHOME_DIR, filename)
     if os.path.isfile(path):
@@ -56,77 +59,48 @@ def _device_yaml_path(device: str) -> str:
     return path
 
 
-def _run(cmd: list[str], timeout: int = 120, cwd: str | None = None) -> str:
-    """Run a command and return combined stdout+stderr."""
-    log.info("Running: %s", " ".join(cmd))
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd or ESPHOME_DIR,
-        )
-        output = result.stdout
-        if result.stderr:
-            output += "\n" + result.stderr
-        output = output.strip()
-        if result.returncode != 0:
-            return f"Command failed (exit {result.returncode}):\n{output}"
-        return output
-    except subprocess.TimeoutExpired:
-        return f"Command timed out after {timeout}s"
-    except FileNotFoundError as e:
-        return f"Command not found: {e}"
+def _is_forbidden(filename: str) -> bool:
+    """Check if a filename is forbidden for transfer."""
+    return os.path.basename(filename).lower() in FORBIDDEN_FILES
 
 
 # ---------------------------------------------------------------------------
-# Background builds (compile/flash) — long jobs run in a thread so a slow
-# build returns a pollable handle instead of hitting the MCP request timeout.
+# Background builds (compile/flash) — the dashboard WS stream is consumed in a
+# worker thread so a slow build returns a pollable handle instead of hitting
+# the MCP request timeout. The dashboard also queues the job server-side, so
+# it survives even if we stop polling.
 # ---------------------------------------------------------------------------
-def _build_worker(key: str, cmd: list[str], timeout: int) -> None:
+def _build_worker(key: str, kind: str, configuration: str, timeout: int) -> None:
     job = _BUILDS[key]
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=ESPHOME_DIR,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-    except FileNotFoundError as e:
-        with _BUILDS_LOCK:
-            job["status"] = "failed"
-            job["returncode"] = -1
-            job["lines"].append(f"Command not found: {e}")
-            job["finished"] = time.time()
-        return
 
-    killer = threading.Timer(timeout, proc.kill)
-    killer.start()
+    def on_line(line: str) -> None:
+        with _BUILDS_LOCK:
+            job["lines"].append(line)
+
+    async def run() -> int:
+        if kind == "flash":
+            return await dashboard.stream_spawn(
+                "/upload", configuration, on_line, port=dashboard.OTA_PORT
+            )
+        return await dashboard.stream_spawn("/compile", configuration, on_line)
+
     try:
-        for line in proc.stdout:
-            with _BUILDS_LOCK:
-                job["lines"].append(line.rstrip("\n"))
-        proc.wait()
-    finally:
-        killer.cancel()
+        rc = asyncio.run(asyncio.wait_for(run(), timeout))
+    except asyncio.TimeoutError:
+        rc = -1
+        on_line(f"[killed: exceeded {timeout}s timeout]")
+    except Exception as e:  # noqa: BLE001 - surface any transport/dashboard fault
+        rc = -1
+        on_line(f"[error contacting dashboard at {dashboard.DASHBOARD_URL}: {e}]")
 
     with _BUILDS_LOCK:
-        job["returncode"] = proc.returncode
+        job["returncode"] = rc
         job["finished"] = time.time()
-        if proc.returncode == 0:
-            job["status"] = "done"
-        elif proc.returncode is not None and proc.returncode < 0:
-            job["status"] = "failed"
-            job["lines"].append(f"[killed: exceeded {timeout}s timeout]")
-        else:
-            job["status"] = "failed"
+        job["status"] = "done" if rc == 0 else "failed"
 
 
-def _start_build(key: str, cmd: list[str], timeout: int) -> dict:
-    """Start (or reuse a running) background build for `key`."""
+def _start_build(key: str, kind: str, configuration: str, timeout: int) -> dict:
+    """Start (or reuse a running) background build for ``key``."""
     with _BUILDS_LOCK:
         job = _BUILDS.get(key)
         if job and job["status"] == "running":
@@ -135,13 +109,12 @@ def _start_build(key: str, cmd: list[str], timeout: int) -> dict:
             "status": "running",
             "lines": [],
             "returncode": None,
-            "cmd": cmd,
             "started": time.time(),
             "finished": None,
         }
         _BUILDS[key] = job
     threading.Thread(
-        target=_build_worker, args=(key, cmd, timeout), daemon=True
+        target=_build_worker, args=(key, kind, configuration, timeout), daemon=True
     ).start()
     return job
 
@@ -175,145 +148,58 @@ def _await_or_handle(key: str, job: dict, label: str) -> str:
     return output
 
 
-def _resolve_substitutions(value: str, subs: dict) -> str:
-    """Resolve ${var} / $var references in a string against the subs map.
-
-    Unknown references are left untouched (so the caller's '$' guards still
-    fire for genuinely unresolved names).
-    """
-    if not isinstance(value, str) or "$" not in value:
-        return value
-
-    def repl(match):
-        key = match.group(1) or match.group(2)
-        replacement = subs.get(key)
-        return str(replacement) if replacement is not None else match.group(0)
-
-    return re.sub(r"\$\{(\w+)\}|\$(\w+)", repl, value)
-
-
-def _parse_device_info(yaml_path: str) -> dict:
-    """Parse basic device info from a YAML file."""
-    try:
-        with open(yaml_path, encoding="utf-8") as f:
-            class SecretLoader(yaml.SafeLoader):
-                pass
-
-            def secret_constructor(loader, node):
-                return f"!secret {loader.construct_scalar(node)}"
-
-            SecretLoader.add_constructor("!secret", secret_constructor)
-
-            # ESPHome configs carry many custom tags (!lambda, !include,
-            # !extend, !remove, ...). We only need scalar metadata here, so
-            # map any unrecognised tag to None instead of crashing the load.
-            def _ignore_unknown(loader, tag_suffix, node):
-                return None
-
-            SecretLoader.add_multi_constructor("!", _ignore_unknown)
-            data = yaml.load(f, Loader=SecretLoader) or {}
-
-        subs = data.get("substitutions", {}) or {}
-        esphome_section = data.get("esphome", {}) or {}
-        name = _resolve_substitutions(
-            esphome_section.get("name", "unknown"), subs
-        )
-        friendly_name = _resolve_substitutions(
-            esphome_section.get("friendly_name", ""), subs
-        )
-        return {
-            "name": name,
-            "friendly_name": friendly_name,
-            "file": os.path.basename(yaml_path),
-        }
-    except Exception as e:
-        return {
-            "name": "error",
-            "friendly_name": "",
-            "file": os.path.basename(yaml_path),
-            "error": str(e),
-        }
-
-
-def _is_forbidden(filename: str) -> bool:
-    """Check if a filename is forbidden for transfer."""
-    return os.path.basename(filename).lower() in FORBIDDEN_FILES
-
-
 # ---------------------------------------------------------------------------
-# Tool functions
+# Tool functions — delegated to the dashboard
 # ---------------------------------------------------------------------------
 def list_devices() -> str:
-    """List all available ESPHome device configurations."""
-    devices = []
+    """List all ESPHome device configurations known to the dashboard."""
+    try:
+        data = asyncio.run(dashboard.list_devices())
+    except Exception as e:  # noqa: BLE001
+        return f"Failed to reach dashboard at {dashboard.DASHBOARD_URL}: {e}"
 
-    for path in sorted(glob.glob(os.path.join(ESPHOME_DIR, "*.yaml"))):
-        if _is_forbidden(path):
-            continue
-        info = _parse_device_info(path)
-        info["status"] = "active"
-        devices.append(info)
-
-    archive_dir = os.path.join(ESPHOME_DIR, "archive")
-    if os.path.isdir(archive_dir):
-        for path in sorted(glob.glob(os.path.join(archive_dir, "*.yaml"))):
-            info = _parse_device_info(path)
-            info["status"] = "archived"
-            devices.append(info)
-
-    if not devices:
+    configured = data.get("configured", [])
+    if not configured:
         return "No device configurations found."
 
     lines = ["ESPHome Devices:", ""]
-    for d in devices:
-        name = d["name"]
+    for d in configured:
+        name = d.get("name", "unknown")
         friendly = f' ("{d["friendly_name"]}")' if d.get("friendly_name") else ""
-        status = f" [{d['status']}]" if d["status"] == "archived" else ""
-        error = f" ERROR: {d['error']}" if d.get("error") else ""
-        lines.append(f"  - {name}{friendly}{status} ({d['file']}){error}")
-
+        conf = d.get("configuration", "")
+        lines.append(f"  - {name}{friendly} ({conf})")
     return "\n".join(lines)
 
 
 def validate(device: str) -> str:
-    """Validate an ESPHome device config."""
-    yaml_path = _device_yaml_path(device)
-    if not os.path.isfile(yaml_path):
-        return f"Device config not found: {yaml_path}"
-    return _run([ESPHOME_BIN, "config", yaml_path])
+    """Validate an ESPHome device config via the dashboard."""
+    configuration = _resolve_device(device)
+    try:
+        _ok, message = asyncio.run(dashboard.validate(configuration))
+    except Exception as e:  # noqa: BLE001
+        return f"Failed to reach dashboard at {dashboard.DASHBOARD_URL}: {e}"
+    return message
 
 
 def compile_device(device: str) -> str:
-    """Compile ESPHome firmware for a device (runs in the background)."""
-    yaml_path = _device_yaml_path(device)
-    if not os.path.isfile(yaml_path):
-        return f"Device config not found: {yaml_path}"
-    key = os.path.basename(yaml_path)
-    job = _start_build(key, [ESPHOME_BIN, "compile", yaml_path], COMPILE_TIMEOUT)
+    """Compile ESPHome firmware for a device (dashboard build, backgrounded)."""
+    configuration = _resolve_device(device)
+    key = configuration
+    job = _start_build(key, "compile", configuration, COMPILE_TIMEOUT)
     return _await_or_handle(key, job, "Compile")
 
 
 def flash(device: str) -> str:
-    """OTA flash a device (runs in the background)."""
-    yaml_path = _device_yaml_path(device)
-    if not os.path.isfile(yaml_path):
-        return f"Device config not found: {yaml_path}"
-    # Force OTA and run non-interactively. The add-on container may also expose
-    # USB serial adapters (/dev/ttyUSB*), which makes `esphome run` prompt for
-    # an upload target and crash with EOFError (no stdin under MCP). Target the
-    # device's mDNS name so the upload always goes Over-The-Air.
-    cmd = [ESPHOME_BIN, "run", yaml_path, "--no-logs"]
-    name = _parse_device_info(yaml_path).get("name", "")
-    if name and name not in ("unknown", "error") and "$" not in name:
-        cmd += ["--device", f"{name}.local"]
-    key = os.path.basename(yaml_path)
-    job = _start_build(key, cmd, FLASH_TIMEOUT)
+    """OTA flash a device (dashboard upload, backgrounded)."""
+    configuration = _resolve_device(device)
+    key = configuration
+    job = _start_build(key, "flash", configuration, FLASH_TIMEOUT)
     return _await_or_handle(key, job, "Flash")
 
 
 def build_status(device: str) -> str:
     """Return the status and output of the latest compile/flash for a device."""
-    key = os.path.basename(_resolve_device(device))
+    key = _resolve_device(device)
     with _BUILDS_LOCK:
         job = _BUILDS.get(key)
         if job is None:
@@ -334,24 +220,27 @@ def build_status(device: str) -> str:
 
 
 def logs(device: str, num_lines: int = 50) -> str:
-    """Get recent logs from an ESPHome device."""
-    yaml_path = _device_yaml_path(device)
-    if not os.path.isfile(yaml_path):
-        return f"Device config not found: {yaml_path}"
-    # Force OTA target so `esphome logs` doesn't prompt for a log host when USB
-    # serial adapters are also present (interactive prompt -> EOFError under
-    # MCP, no stdin). Same approach as flash().
-    cmd = ["timeout", "15", ESPHOME_BIN, "logs", yaml_path]
-    name = _parse_device_info(yaml_path).get("name", "")
-    if name and name not in ("unknown", "error") and "$" not in name:
-        cmd += ["--device", f"{name}.local"]
-    output = _run(cmd, timeout=30)
-    lines = output.splitlines()
-    if len(lines) > num_lines:
-        lines = lines[-num_lines:]
-    return "\n".join(lines)
+    """Snapshot recent device logs via the dashboard's /ws log stream."""
+    configuration = _resolve_device(device)
+    collected: list[str] = []
+
+    try:
+        asyncio.run(
+            dashboard.stream_logs(
+                configuration, collected.append, max_lines=num_lines
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Failed to stream logs from dashboard at {dashboard.DASHBOARD_URL}: {e}"
+
+    if not collected:
+        return f"No log output captured for {configuration} (device offline?)."
+    return "\n".join(collected[-num_lines:])
 
 
+# ---------------------------------------------------------------------------
+# File / font tools — local filesystem on the shared /config mount
+# ---------------------------------------------------------------------------
 def push_files(files: dict[str, str]) -> str:
     """Write YAML files to the ESPHome config directory.
 

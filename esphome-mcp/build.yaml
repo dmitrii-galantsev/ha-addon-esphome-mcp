@@ -1,3 +1,6 @@
+# Slim Python base — no ESPHome toolchain is bundled anymore; all builds are
+# delegated to the ESPHome Device Builder dashboard. This removes the pinned
+# esphome version that used to reject configs needing newer features.
 build_from:
-  aarch64: ghcr.io/esphome/esphome:2026.4.5
-  amd64: ghcr.io/esphome/esphome:2026.4.5
+  aarch64: python:3.12-slim
+  amd64: python:3.12-slim

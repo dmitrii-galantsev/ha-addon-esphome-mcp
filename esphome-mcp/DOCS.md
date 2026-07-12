@@ -1,17 +1,29 @@
 # ESPHome MCP Server
 
 This add-on runs an MCP (Model Context Protocol) server that exposes
-ESPHome operations as tools for Claude Code. It runs directly on your
-Home Assistant instance with native filesystem access to
-`/config/esphome/` — no SSH tunneling required.
+ESPHome operations as tools for Claude Code. It delegates builds, flashes,
+validation and logs to the ESPHome Device Builder dashboard (the official
+ESPHome add-on) so they always run against **current** ESPHome, and keeps
+native filesystem access to `/config/esphome/` for config/font transfer —
+no SSH tunneling required.
 
 ## Architecture
 
 ```text
-Claude Code (desktop)  --HTTP-->  HA Add-on (MCP Server)  --local-->  ESPHome CLI
-                                       |
-                                  /config/esphome/  (direct filesystem access)
+Claude Code (desktop)
+     |  HTTP (MCP, port 8098, Bearer token)
+     v
+HA Add-on (MCP Server)
+     |  HTTP/WS  -->  ESPHome Device Builder dashboard (official add-on, port 6052)
+     |                    - GET /devices, GET /json-config
+     |                    - WS /compile, WS /upload, WS /ws (logs)
+     |  local file I/O
+     v
+/config/esphome/  (shared mount: push/pull YAML + fonts)
 ```
+
+Because compilation happens in the ESPHome add-on's container, this add-on
+ships **no** ESPHome toolchain and is not tied to any esphome version.
 
 ## Configuration
 
@@ -20,11 +32,21 @@ Claude Code (desktop)  --HTTP-->  HA Add-on (MCP Server)  --local-->  ESPHome CL
 An authentication token to secure the MCP endpoint. If left empty, a
 token is auto-generated on first start and printed in the add-on logs.
 
-You can set your own token in the add-on configuration:
-
 ```yaml
 auth_token: "my-secret-token"
 ```
+
+### dashboard_url
+
+URL of the ESPHome Device Builder dashboard the add-on delegates builds to.
+Defaults to the official ESPHome add-on's internal Supervisor hostname
+`http://core-esphome:6052`. If your ESPHome add-on has a different slug, set
+it here (find the slug in the add-on's page URL, or via `ha addons`).
+
+### dashboard_token
+
+Only needed if the dashboard is protected with a password. Leave empty for
+the default (open) HA add-on behind Ingress.
 
 ## Setup
 
