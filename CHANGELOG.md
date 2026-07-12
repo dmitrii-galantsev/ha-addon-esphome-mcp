@@ -7,6 +7,16 @@ All notable changes to this project will be documented in this file.
 - **Bert Berrevoets** — Project author
 - **Claude Code** — AI-assisted development
 
+## [1.3.2] - 2026-07-12
+
+### Fixed
+
+- Run delegated dashboard calls on a worker thread. FastMCP invokes the sync
+  tools on its own event-loop thread, so the direct `asyncio.run()` in
+  `list_devices`/`validate`/`logs` raised "cannot be called from a running
+  event loop". Offload via a one-shot thread pool. Verified end-to-end
+  against a live dashboard (list, validate, and WS compile streaming).
+
 ## [1.3.1] - 2026-07-12
 
 ### Fixed

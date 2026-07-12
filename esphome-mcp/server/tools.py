@@ -10,6 +10,7 @@ filesystem (``/config/esphome``), which needs no esphome binary.
 
 import asyncio
 import base64
+import concurrent.futures
 import glob
 import logging
 import os
@@ -62,6 +63,17 @@ def _device_yaml_path(device: str) -> str:
 def _is_forbidden(filename: str) -> bool:
     """Check if a filename is forbidden for transfer."""
     return os.path.basename(filename).lower() in FORBIDDEN_FILES
+
+
+def _run_async(coro):
+    """Run a coroutine to completion from a sync tool.
+
+    FastMCP invokes these sync tools directly on its event-loop thread, so a
+    bare ``asyncio.run()`` raises "cannot be called from a running event
+    loop". Offload to a worker thread that owns its own fresh loop.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(asyncio.run, coro).result()
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +166,7 @@ def _await_or_handle(key: str, job: dict, label: str) -> str:
 def list_devices() -> str:
     """List all ESPHome device configurations known to the dashboard."""
     try:
-        data = asyncio.run(dashboard.list_devices())
+        data = _run_async(dashboard.list_devices())
     except Exception as e:  # noqa: BLE001
         return f"Failed to reach dashboard at {dashboard.DASHBOARD_URL}: {e}"
 
@@ -175,7 +187,7 @@ def validate(device: str) -> str:
     """Validate an ESPHome device config via the dashboard."""
     configuration = _resolve_device(device)
     try:
-        _ok, message = asyncio.run(dashboard.validate(configuration))
+        _ok, message = _run_async(dashboard.validate(configuration))
     except Exception as e:  # noqa: BLE001
         return f"Failed to reach dashboard at {dashboard.DASHBOARD_URL}: {e}"
     return message
@@ -225,7 +237,7 @@ def logs(device: str, num_lines: int = 50) -> str:
     collected: list[str] = []
 
     try:
-        asyncio.run(
+        _run_async(
             dashboard.stream_logs(
                 configuration, collected.append, max_lines=num_lines
             )
