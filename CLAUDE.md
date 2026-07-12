@@ -49,5 +49,5 @@ docker run -p 8098:8098 -v /path/to/config:/config -e ESPHOME_MCP_AUTH_TOKEN=tes
 
 ## Deployment
 
-Add `https://github.com/bberrevoets/ha-addon-esphome-mcp` as a custom
+Add `https://github.com/dmitrii-galantsev/ha-addon-esphome-mcp` as a custom
 add-on repository in Home Assistant, then install and start the add-on.

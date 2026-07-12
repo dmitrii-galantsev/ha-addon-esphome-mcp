@@ -13,7 +13,7 @@ Assistant add-on with direct filesystem access — no SSH required.
    **Settings > Add-ons > Add-on Store > ... (menu) > Repositories**
 
    ```text
-   https://github.com/bberrevoets/ha-addon-esphome-mcp
+   https://github.com/dmitrii-galantsev/ha-addon-esphome-mcp
    ```
 
 2. Install and start the **ESPHome MCP Server** add-on.

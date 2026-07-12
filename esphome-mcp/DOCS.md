@@ -30,7 +30,7 @@ auth_token: "my-secret-token"
 
 1. Add this repository as a custom add-on repository in Home Assistant:
    **Settings > Add-ons > Add-on Store > ... > Repositories**
-   Enter: `https://github.com/bberrevoets/ha-addon-esphome-mcp`
+   Enter: `https://github.com/dmitrii-galantsev/ha-addon-esphome-mcp`
 
 2. Install the **ESPHome MCP Server** add-on and start it.
 
